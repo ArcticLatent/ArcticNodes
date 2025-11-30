@@ -9,7 +9,7 @@ NODE_CLASS_MAPPINGS = {
 
 # Human-friendly names shown in the ComfyUI node menu.
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "FluxLatentImage": "Flux Latent Image (Arctic)",
-    "FluxPromptWithGuidance": "Flux Prompt with Guidance (Arctic)",
-    "FluxSmartResize": "Flux Smart Resize (Arctic)",
+    "FluxLatentImage": "Flux Latent Image (Arctic Latent)",
+    "FluxPromptWithGuidance": "Flux Prompt with Guidance (Arctic Latent)",
+    "FluxSmartResize": "Flux Smart Resize (Arctic Latent)",
 }
