@@ -184,12 +184,17 @@ class FluxLatentImage:
     Select from preset sets/orientations or pick an exact Flux resolution, with optional batching.
     """
 
-    RESOLUTION_CHOICES = sorted(
-        {(w, h) for res_list in RESOLUTION_SETS.values() for (w, h) in res_list}
-    )
-    RESOLUTION_LABELS = ["auto_from_set"] + [
-        f"{w}x{h}" for (w, h) in RESOLUTION_CHOICES
-    ]
+    @staticmethod
+    def _labels_for_orientation(orientation: str):
+        choices = sorted(
+            {
+                (w, h)
+                for res_list in RESOLUTION_SETS.values()
+                for (w, h) in res_list
+                if _orientation(w, h) == orientation
+            }
+        )
+        return ["auto_from_set"] + [f"{w}x{h}" for (w, h) in choices]
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -203,11 +208,27 @@ class FluxLatentImage:
                     ["landscape", "portrait", "square"],
                     {"default": "landscape"},
                 ),
-                "resolution_choice": (
-                    cls.RESOLUTION_LABELS,
+                "resolution_choice_landscape": (
+                    cls._labels_for_orientation("landscape"),
                     {
                         "default": "auto_from_set",
-                        "label": "Resolution Choice (auto or exact pick)",
+                        "label": "Resolution (landscape)",
+                        "display": "dropdown",
+                    },
+                ),
+                "resolution_choice_portrait": (
+                    cls._labels_for_orientation("portrait"),
+                    {
+                        "default": "auto_from_set",
+                        "label": "Resolution (portrait)",
+                        "display": "dropdown",
+                    },
+                ),
+                "resolution_choice_square": (
+                    cls._labels_for_orientation("square"),
+                    {
+                        "default": "auto_from_set",
+                        "label": "Resolution (square)",
                         "display": "dropdown",
                     },
                 ),
@@ -242,13 +263,27 @@ class FluxLatentImage:
         return oriented[idx]
 
     def build(
-        self, resolution_set, orientation, resolution_choice, variant_index, batch_size
+        self,
+        resolution_set,
+        orientation,
+        resolution_choice_landscape,
+        resolution_choice_portrait,
+        resolution_choice_square,
+        variant_index,
+        batch_size,
     ):
-        if resolution_choice != "auto_from_set":
+        if orientation == "landscape":
+            chosen = resolution_choice_landscape
+        elif orientation == "portrait":
+            chosen = resolution_choice_portrait
+        else:
+            chosen = resolution_choice_square
+
+        if chosen != "auto_from_set":
             try:
-                target_w, target_h = map(int, resolution_choice.split("x"))
+                target_w, target_h = map(int, chosen.split("x"))
             except Exception as exc:
-                raise ValueError(f"Bad resolution format: {resolution_choice}") from exc
+                raise ValueError(f"Bad resolution format: {chosen}") from exc
         else:
             target_w, target_h = self._pick_resolution(
                 resolution_set, orientation, variant_index
