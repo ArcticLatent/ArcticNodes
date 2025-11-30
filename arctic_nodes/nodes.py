@@ -380,7 +380,16 @@ class FluxPromptWithGuidance:
         elif hasattr(guidance_node, "encode"):
             guided = guidance_node.encode(base_conditioning, guidance)[0]
         else:
-            # Last-resort call style for unexpected implementations.
-            guided = guidance_node(base_conditioning, guidance)[0]  # type: ignore
+            fn_name = getattr(guidance_node, "FUNCTION", None)
+            fn = getattr(guidance_node, fn_name, None) if fn_name else None
+            if callable(fn):
+                guided = fn(base_conditioning, guidance)[0]
+            elif callable(guidance_node):
+                guided = guidance_node(base_conditioning, guidance)[0]  # type: ignore
+            else:
+                raise RuntimeError(
+                    "FluxGuidance does not expose apply_guidance/encode and is not callable. "
+                    f"Found FUNCTION={fn_name!r}; available attrs: {dir(guidance_node)}"
+                )
 
         return (guided,)
