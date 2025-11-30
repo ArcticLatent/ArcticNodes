@@ -184,17 +184,40 @@ class FluxLatentImage:
     Select from preset sets/orientations or pick an exact Flux resolution, with optional batching.
     """
 
-    @staticmethod
-    def _labels_for_orientation(orientation: str):
-        choices = sorted(
+    RESOLUTION_CHOICES = {
+        "landscape": sorted(
             {
                 (w, h)
                 for res_list in RESOLUTION_SETS.values()
                 for (w, h) in res_list
-                if _orientation(w, h) == orientation
+                if _orientation(w, h) == "landscape"
             }
-        )
-        return ["auto_from_set"] + [f"{w}x{h}" for (w, h) in choices]
+        ),
+        "portrait": sorted(
+            {
+                (w, h)
+                for res_list in RESOLUTION_SETS.values()
+                for (w, h) in res_list
+                if _orientation(w, h) == "portrait"
+            }
+        ),
+        "square": sorted(
+            {
+                (w, h)
+                for res_list in RESOLUTION_SETS.values()
+                for (w, h) in res_list
+                if _orientation(w, h) == "square"
+            }
+        ),
+    }
+
+    RESOLUTION_LABELS = ["auto_from_set"] + [
+        f"Landscape: {w}x{h}" for (w, h) in RESOLUTION_CHOICES["landscape"]
+    ] + [
+        f"Portrait: {w}x{h}" for (w, h) in RESOLUTION_CHOICES["portrait"]
+    ] + [
+        f"Square: {w}x{h}" for (w, h) in RESOLUTION_CHOICES["square"]
+    ]
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -208,27 +231,11 @@ class FluxLatentImage:
                     ["landscape", "portrait", "square"],
                     {"default": "landscape"},
                 ),
-                "resolution_choice_landscape": (
-                    cls._labels_for_orientation("landscape"),
+                "resolution_choice": (
+                    cls.RESOLUTION_LABELS,
                     {
                         "default": "auto_from_set",
-                        "label": "Resolution (landscape)",
-                        "display": "dropdown",
-                    },
-                ),
-                "resolution_choice_portrait": (
-                    cls._labels_for_orientation("portrait"),
-                    {
-                        "default": "auto_from_set",
-                        "label": "Resolution (portrait)",
-                        "display": "dropdown",
-                    },
-                ),
-                "resolution_choice_square": (
-                    cls._labels_for_orientation("square"),
-                    {
-                        "default": "auto_from_set",
-                        "label": "Resolution (square)",
+                        "label": "Resolution choice (auto or pick)",
                         "display": "dropdown",
                     },
                 ),
@@ -262,28 +269,25 @@ class FluxLatentImage:
         idx = variant_index % len(oriented)
         return oriented[idx]
 
-    def build(
-        self,
-        resolution_set,
-        orientation,
-        resolution_choice_landscape,
-        resolution_choice_portrait,
-        resolution_choice_square,
-        variant_index,
-        batch_size,
-    ):
-        if orientation == "landscape":
-            chosen = resolution_choice_landscape
-        elif orientation == "portrait":
-            chosen = resolution_choice_portrait
-        else:
-            chosen = resolution_choice_square
+    @staticmethod
+    def _parse_resolution_choice(choice: str):
+        if choice == "auto_from_set":
+            return None
+        # Expect format like "Landscape: 1152x896" etc.
+        try:
+            label, dims = choice.split(":")
+            dims = dims.strip()
+            w, h = map(int, dims.split("x"))
+            return (w, h)
+        except Exception as exc:
+            raise ValueError(f"Bad resolution format: {choice}") from exc
 
-        if chosen != "auto_from_set":
-            try:
-                target_w, target_h = map(int, chosen.split("x"))
-            except Exception as exc:
-                raise ValueError(f"Bad resolution format: {chosen}") from exc
+    def build(
+        self, resolution_set, orientation, resolution_choice, variant_index, batch_size
+    ):
+        parsed = self._parse_resolution_choice(resolution_choice)
+        if parsed is not None:
+            target_w, target_h = parsed
         else:
             target_w, target_h = self._pick_resolution(
                 resolution_set, orientation, variant_index
