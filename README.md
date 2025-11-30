@@ -1,9 +1,10 @@
 # ArcticNodes
 
-Custom Flux-friendly nodes for ComfyUI, kept lean for tutorial use. Drop the folder into `ComfyUI/custom_nodes` and restart ComfyUI to load.
+Custom ComfyUI helper nodes kept lean for tutorial use. Drop the folder into `ComfyUI/custom_nodes` and restart ComfyUI to load.
 
 ## Nodes included
 
+**Flux tools**
 - `FluxSmartResize`: Resize an `IMAGE` tensor to a Flux-safe resolution set (1M, 1.5M, 2M) with auto orientation selection and optional upscale control.
 - `FluxLatentImage`: Create an empty `LATENT` at a Flux-safe resolution, choosing set, orientation, and variant index; handy to feed into ksampler inputs for text-to-image.
 - `FluxPromptWithGuidance`: One-stop prompt + guidance node; encodes text with CLIP and applies `FluxGuidance` so you can plug straight into the ksampler positive input.
