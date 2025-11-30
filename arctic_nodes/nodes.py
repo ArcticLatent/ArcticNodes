@@ -1,3 +1,5 @@
+import importlib
+
 import torch
 import torch.nn.functional as F
 
@@ -46,6 +48,31 @@ RESOLUTION_SETS = {
     "1_5M_flux": RESOLUTIONS_1_5M,
     "2M_flux": RESOLUTIONS_2M,
 }
+
+
+def _resolve_flux_guidance_cls():
+    """
+    Locate FluxGuidance from core nodes or flux extras.
+    Returns the class or None if not found.
+    """
+    search_modules = []
+    if comfy_nodes is not None:
+        search_modules.append(comfy_nodes)
+
+    # Common module names where FluxGuidance may live depending on ComfyUI build.
+    for mod_name in ("comfy_extras.nodes_flux", "nodes_flux"):
+        try:
+            mod = importlib.import_module(mod_name)
+            search_modules.append(mod)
+        except Exception:
+            continue
+
+    for mod in search_modules:
+        cls = getattr(mod, "FluxGuidance", None)
+        if cls is not None:
+            return cls
+
+    return None
 
 
 def _orientation(w: int, h: int) -> str:
@@ -332,16 +359,15 @@ class FluxPromptWithGuidance:
             raise RuntimeError("ComfyUI core nodes module 'nodes' not available.")
 
         text_node_cls = getattr(comfy_nodes, "CLIPTextEncode", None)
-        guidance_cls = getattr(comfy_nodes, "FluxGuidance", None)
+        guidance_cls = _resolve_flux_guidance_cls()
 
-        if text_node_cls is None or guidance_cls is None:
-            missing = []
-            if text_node_cls is None:
-                missing.append("CLIPTextEncode")
-            if guidance_cls is None:
-                missing.append("FluxGuidance")
+        if text_node_cls is None:
             raise RuntimeError(
-                f"Missing core nodes: {', '.join(missing)}. Update ComfyUI to a Flux build."
+                "Missing core node: CLIPTextEncode. Update ComfyUI to a Flux build."
+            )
+        if guidance_cls is None:
+            raise RuntimeError(
+                "Missing core node: FluxGuidance. Update ComfyUI to a Flux build or ensure flux extras are installed."
             )
 
         text_node = text_node_cls()
