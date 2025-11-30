@@ -181,12 +181,15 @@ class FluxSmartResize:
 class FluxLatentImage:
     """
     Create an empty latent tensor sized to a Flux-safe resolution for text-to-image.
-    Select from preset resolutions and orientations, with optional batching.
+    Select from preset sets/orientations or pick an exact Flux resolution, with optional batching.
     """
 
     RESOLUTION_CHOICES = sorted(
         {(w, h) for res_list in RESOLUTION_SETS.values() for (w, h) in res_list}
     )
+    RESOLUTION_LABELS = ["auto_from_set"] + [
+        f"{w}x{h}" for (w, h) in RESOLUTION_CHOICES
+    ]
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -199,6 +202,14 @@ class FluxLatentImage:
                 "orientation": (
                     ["landscape", "portrait", "square"],
                     {"default": "landscape"},
+                ),
+                "resolution_choice": (
+                    cls.RESOLUTION_LABELS,
+                    {
+                        "default": "auto_from_set",
+                        "label": "Resolution Choice (auto or exact pick)",
+                        "display": "dropdown",
+                    },
                 ),
                 "variant_index": (
                     "INT",
@@ -230,10 +241,18 @@ class FluxLatentImage:
         idx = variant_index % len(oriented)
         return oriented[idx]
 
-    def build(self, resolution_set, orientation, variant_index, batch_size):
-        target_w, target_h = self._pick_resolution(
-            resolution_set, orientation, variant_index
-        )
+    def build(
+        self, resolution_set, orientation, resolution_choice, variant_index, batch_size
+    ):
+        if resolution_choice != "auto_from_set":
+            try:
+                target_w, target_h = map(int, resolution_choice.split("x"))
+            except Exception as exc:
+                raise ValueError(f"Bad resolution format: {resolution_choice}") from exc
+        else:
+            target_w, target_h = self._pick_resolution(
+                resolution_set, orientation, variant_index
+            )
 
         latent = torch.zeros(
             (batch_size, 4, target_h // 8, target_w // 8), dtype=torch.float32
