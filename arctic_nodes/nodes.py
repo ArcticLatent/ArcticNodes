@@ -1,7 +1,8 @@
 import importlib
+import math
 
 import torch
-import torch.nn.functional as F
+import comfy.utils as comfy_utils
 
 try:
     import nodes as comfy_nodes  # ComfyUI core nodes (CLIPTextEncode, FluxGuidance)
@@ -59,7 +60,6 @@ def _resolve_flux_guidance_cls():
     if comfy_nodes is not None:
         search_modules.append(comfy_nodes)
 
-    # Common module names where FluxGuidance may live depending on ComfyUI build.
     for mod_name in ("comfy_extras.nodes_flux", "nodes_flux"):
         try:
             mod = importlib.import_module(mod_name)
@@ -87,122 +87,76 @@ def _orientation(w: int, h: int) -> str:
 
 
 class FluxSmartResize:
-    """
-    Resize an IMAGE to a Flux-safe resolution with orientation and upscale control.
-    """
+    upscale_methods = ["bilinear", "bicubic", "lanczos", "nearest-exact", "area"]
+
+    # Flux-safe resolutions (width, height) – stored in one orientation only
+    FLUX_SAFE_RESOLUTIONS = [
+        (1408, 1408),
+        (1728, 1152),
+        (1664, 1216),
+        (1920, 1088),
+        (2176, 960),
+        (1024, 1024),
+        (1216, 832),
+        (1152, 896),
+        (1344, 768),
+        (1536, 640),
+        (320, 320),
+        (384, 256),
+        (448, 320),
+        (448, 256),
+        (576, 256),
+    ]
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
                 "image": ("IMAGE",),
-                "resolution_set": (
-                    ["1M_flux", "1_5M_flux", "2M_flux"],
-                    {"default": "1M_flux"},
-                ),
-                "orientation_mode": (
-                    ["auto", "landscape", "portrait", "square"],
-                    {"default": "auto"},
-                ),
-                "allow_upscale": (
-                    "BOOLEAN",
+                "upscale_method": (cls.upscale_methods, {"default": "bilinear"}),
+                "total_megapixels": (
+                    "FLOAT",
                     {
-                        "default": True,
-                        "label": "Allow Upscale (otherwise only downscale)",
+                        "default": 1.0,
+                        "min": 0.01,
+                        "max": 128.0,
+                        "step": 0.01,
+                        "tooltip": "Set the total megapixels (e.g., 1.0 = 1 MP)",
                     },
                 ),
             }
         }
 
-    RETURN_TYPES = ("IMAGE", "INT", "INT")
-    RETURN_NAMES = ("image", "width", "height")
-    FUNCTION = "resize"
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "upscale"
     CATEGORY = "Arctic/Flux"
 
-    def _pick_best_resolution(
-        self,
-        width: int,
-        height: int,
-        resolution_set: str,
-        orientation_mode: str,
-        allow_upscale: bool,
-    ):
-        src_aspect = width / height if height != 0 else 1.0
-        src_pixels = width * height
-
-        candidates = RESOLUTION_SETS.get(resolution_set, RESOLUTIONS_1M)
-
-        if orientation_mode == "auto":
-            desired_orientation = _orientation(width, height)
-        else:
-            desired_orientation = orientation_mode
-
-        oriented_candidates = [
-            (w_tgt, h_tgt)
-            for (w_tgt, h_tgt) in candidates
-            if _orientation(w_tgt, h_tgt) == desired_orientation
-        ]
-
-        if not oriented_candidates:
-            oriented_candidates = candidates
-
-        best_res = None
-        best_score = None
-
-        for w_tgt, h_tgt in oriented_candidates:
-            if not allow_upscale and (w_tgt > width or h_tgt > height):
-                continue
-
-            tgt_aspect = w_tgt / h_tgt if h_tgt != 0 else 1.0
-            tgt_pixels = w_tgt * h_tgt
-
-            aspect_diff = abs(tgt_aspect - src_aspect)
-            pixel_diff_ratio = abs(tgt_pixels - src_pixels) / max(src_pixels, 1)
-            score = aspect_diff + 0.25 * pixel_diff_ratio
-
-            if best_score is None or score < best_score:
-                best_score = score
-                best_res = (w_tgt, h_tgt)
-
-        if best_res is None:
-            for w_tgt, h_tgt in oriented_candidates:
-                tgt_aspect = w_tgt / h_tgt if h_tgt != 0 else 1.0
-                aspect_diff = abs(tgt_aspect - src_aspect)
-                if best_score is None or aspect_diff < best_score:
-                    best_score = aspect_diff
-                    best_res = (w_tgt, h_tgt)
-
-        return best_res
-
-    def resize(self, image, resolution_set, orientation_mode, allow_upscale):
-        """
-        image: torch.Tensor [B, H, W, C] in 0–1 range.
-        """
-        if not torch.is_tensor(image):
-            raise ValueError("Expected IMAGE tensor")
+    def upscale(self, image, upscale_method, total_megapixels):
+        if upscale_method in ["nearest-exact", "area"]:
+            raise Exception(
+                f"❌ '{upscale_method}' gives poor results.\n\n"
+                f"👉 Go to the Flux Smart Resize (Arctic Latent) node and switch to another like 'lanczos'.\n\n"
+                f"Node may be hidden behind KSampler."
+            )
 
         b, h, w, c = image.shape
 
-        target_w, target_h = self._pick_best_resolution(
-            w, h, resolution_set, orientation_mode, allow_upscale
-        )
+        # Skip scaling if image matches any Flux-safe resolution
+        if (w, h) in self.FLUX_SAFE_RESOLUTIONS or (h, w) in self.FLUX_SAFE_RESOLUTIONS:
+            return (image,)
 
-        if (w, h) == (target_w, target_h):
-            return (image, target_w, target_h)
+        samples = image.movedim(-1, 1)
+        orig_h, orig_w = samples.shape[2], samples.shape[3]
 
-        x = image.movedim(-1, 1)  # [B, C, H, W]
+        target_pixels = int(round(total_megapixels * 1024 * 1024))
+        scale_by = math.sqrt(target_pixels / (orig_w * orig_h))
 
-        x_resized = F.interpolate(
-            x,
-            size=(target_h, target_w),
-            mode="bicubic",
-            align_corners=False,
-        )
+        new_w = max(1, round(orig_w * scale_by))
+        new_h = max(1, round(orig_h * scale_by))
 
-        out = x_resized.movedim(1, -1)  # back to [B, H, W, C]
-        out = torch.clamp(out, 0.0, 1.0)
-
-        return (out, target_w, target_h)
+        scaled = comfy_utils.common_upscale(samples, new_w, new_h, upscale_method, "disabled")
+        scaled = scaled.movedim(1, -1)
+        return (scaled,)
 
 
 class FluxLatentImage:
@@ -374,7 +328,6 @@ class FluxPromptWithGuidance:
         base_conditioning = text_node.encode(clip, prompt)[0]
 
         guidance_node = guidance_cls()
-        # FluxGuidance uses FUNCTION "apply_guidance" in mainline; fall back to common alternatives.
         if hasattr(guidance_node, "apply_guidance"):
             guided = guidance_node.apply_guidance(base_conditioning, guidance)[0]
         elif hasattr(guidance_node, "encode"):
