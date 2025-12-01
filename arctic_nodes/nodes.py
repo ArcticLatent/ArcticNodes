@@ -86,6 +86,16 @@ def _orientation(w: int, h: int) -> str:
     return "landscape" if w > h else "portrait"
 
 
+def _snap_to_multiple(value: int, multiple: int = 16, minimum: int | None = None) -> int:
+    """
+    Snap an integer to the nearest multiple, enforcing a floor.
+    Defaults to multiples of 16 for Flux safety.
+    """
+    floor = multiple if minimum is None else max(minimum, multiple)
+    snapped = int(round(value / multiple)) * multiple
+    return max(floor, snapped)
+
+
 class FluxSmartResize:
     upscale_methods = ["bilinear", "bicubic", "lanczos", "nearest-exact", "area"]
 
@@ -153,6 +163,10 @@ class FluxSmartResize:
 
         new_w = max(1, round(orig_w * scale_by))
         new_h = max(1, round(orig_h * scale_by))
+
+        # Snap to multiples of 16 so Flux gets a safe resolution
+        new_w = _snap_to_multiple(new_w, 16)
+        new_h = _snap_to_multiple(new_h, 16)
 
         scaled = comfy_utils.common_upscale(samples, new_w, new_h, upscale_method, "disabled")
         scaled = scaled.movedim(1, -1)
