@@ -345,7 +345,7 @@ class FluxPromptWithGuidance:
                         "default": "A cinematic photo of a snow fox, 35mm, dusk light",
                     },
                 ),
-                "guidance": ("FLOAT", {"default": 3.5, "min": 0.0, "max": 20.0}),
+                "guidance": ("FLOAT", {"default": 3.5, "min": 0.0, "max": 200.0}),
             }
         }
 
